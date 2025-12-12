@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+python-dotenv
+groq
+pydantic
+starlette
+phonenumbers
+requests
+email-validator

@@ -1,0 +1,86 @@
+version: "3.9"
+
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: mysql_container
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpass
+      MYSQL_DATABASE: agentdb
+      MYSQL_USER: agent
+      MYSQL_PASSWORD: agentpass
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    networks:
+      - agent_network
+
+  backend:
+    build:
+      context: ./backend
+    container_name: backend
+    env_file:
+      - ./backend/.env
+    depends_on:
+      - mysql
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app # live reload
+    networks:
+      - agent_network
+
+  frontend:
+    build:
+      context: ./frontend
+    container_name: frontend
+    ports:
+      - "5173:80"
+    depends_on:
+      - backend
+    networks:
+      - agent_network
+
+  mcp_service:
+    build:
+      context: ./mcp
+    container_name: mcp_service
+    ports:
+      - "9000:9000"
+    env_file:
+      - ./mcp/.env
+    volumes:
+      - ./mcp:/app
+    command: uvicorn main:app --host 0.0.0.0 --port 9000 --reload
+    networks:
+      - agent_network
+
+  agents:
+    build:
+      context: ./agents
+    container_name: agents
+    depends_on:
+      - backend
+      - mcp_service
+    environment:
+      EMAIL_TOOL_URL: http://mcp_service:9000/tools/email_reputation
+      PHONE_TOOL_URL: http://mcp_service:9000/tools/phone_check
+      NAME_TOOL_URL: http://mcp_service:9000/tools/name_check
+      COMPANY_TOOL_URL: http://mcp_service:9000/tools/company_enrich
+      MESSAGE_TOOL_URL: http://mcp_service:9000/tools/intent
+      AGGREGATOR_URL: http://mcp_service:9000/tools/aggregate
+      BACKEND_URL: http://backend:8000
+    ports:
+      - "8010:8010"
+    env_file:
+      - ./agents/.env # OPTIONAL → BETTER than loading mcp env
+    networks:
+      - agent_network
+
+networks:
+  agent_network:
+
+
+volumes:
+  mysql_data:
