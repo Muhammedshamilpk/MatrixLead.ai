@@ -120,22 +120,34 @@ export default function Dashboard() {
 
         {/* EMAIL TAB */}
         {activeTab === "email" && (
-          leads.filter((l) => l.email).length === 0 ? (
-            <p className="text-gray-500">No emails available.</p>
-          ) : (
-            <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-              {leads
-                .filter((l) => l.email)
-                .map((lead, idx) => (
-                  <LeadCard
-                    key={idx}
-                    index={idx}
-                    lead={lead}
-                    onClick={() => setSelectedLead(lead)}
-                  />
-                ))}
+          <div className="space-y-6">
+            <div className="flex justify-between items-center">
+              <p className="text-gray-400">
+                Send emails manually to qualified leads
+              </p>
+              <div className="text-sm text-gray-500">
+                {leads.filter((l) => l.email && ['HOT', 'QUALIFIED', 'WARM'].includes(l.status)).length} leads ready
+              </div>
             </div>
-          )
+
+            {leads.filter((l) => l.email).length === 0 ? (
+              <p className="text-gray-500">No emails available.</p>
+            ) : (
+              <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+                {leads
+                  .filter((l) => l.email)
+                  .map((lead, idx) => (
+                    <EmailLeadCard
+                      key={idx}
+                      index={idx}
+                      lead={lead}
+                      onEmailSent={fetchLeads}
+                      onClick={() => setSelectedLead(lead)}
+                    />
+                  ))}
+              </div>
+            )}
+          </div>
         )}
 
         {/* CHAT TAB */}
@@ -222,6 +234,117 @@ function LeadCard({ lead, index, onClick }) {
   );
 }
 
+function EmailLeadCard({ lead, index, onClick, onEmailSent }) {
+  const [sending, setSending] = useState(false);
+  const [emailStatus, setEmailStatus] = useState(null);
+
+  const sendEmail = async (e) => {
+    e.stopPropagation(); // Prevent card click
+    setSending(true);
+    setEmailStatus(null);
+
+    try {
+      const response = await axios.post(`http://127.0.0.1:8000/api/leads/${lead.id}/send-email`);
+      setEmailStatus({ type: 'success', message: 'Email sent successfully!' });
+      if (onEmailSent) onEmailSent();
+
+      // Clear success message after 3 seconds
+      setTimeout(() => setEmailStatus(null), 3000);
+    } catch (error) {
+      console.error('Error sending email:', error);
+      setEmailStatus({
+        type: 'error',
+        message: error.response?.data?.detail || 'Failed to send email'
+      });
+
+      // Clear error message after 5 seconds
+      setTimeout(() => setEmailStatus(null), 5000);
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const getStatusColor = (status) => {
+    switch (status) {
+      case 'HOT': return 'bg-red-500/20 text-red-400 border-red-500/30';
+      case 'QUALIFIED': return 'bg-orange-500/20 text-orange-400 border-orange-500/30';
+      case 'WARM': return 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30';
+      case 'NURTURE': return 'bg-blue-500/20 text-blue-400 border-blue-500/30';
+      case 'REVIEW': return 'bg-gray-500/20 text-gray-400 border-gray-500/30';
+      default: return 'bg-gray-500/20 text-gray-400 border-gray-500/30';
+    }
+  };
+
+  const canSendEmail = ['HOT', 'QUALIFIED', 'WARM'].includes(lead.status);
+
+  return (
+    <motion.div
+      onClick={onClick}
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="bg-zinc-900/40 p-6 rounded-2xl border border-white/5 hover:border-purple-500/40 transition cursor-pointer relative"
+    >
+      {/* Status Badge */}
+      <div className={`absolute top-4 right-4 px-3 py-1 rounded-full text-xs font-semibold border ${getStatusColor(lead.status)}`}>
+        {lead.status}
+      </div>
+
+      <h3 className="text-xl font-bold pr-24">{lead.name}</h3>
+      <p className="text-gray-400 text-sm mt-1">{lead.email}</p>
+      {lead.company && <p className="text-gray-500 text-sm">{lead.company}</p>}
+
+      <div className="mt-4 flex items-center gap-4 text-sm">
+        <div>
+          <span className="text-gray-500">Score: </span>
+          <span className="text-purple-400 font-semibold">
+            {lead.score ? `${Math.round(lead.score * 100)}%` : 'N/A'}
+          </span>
+        </div>
+        {lead.confidence && (
+          <div>
+            <span className="text-gray-500">Confidence: </span>
+            <span className="text-blue-400 font-semibold">
+              {Math.round(lead.confidence * 100)}%
+            </span>
+          </div>
+        )}
+      </div>
+
+      {/* Email Status Message */}
+      {emailStatus && (
+        <div className={`mt-4 p-3 rounded-lg text-sm ${emailStatus.type === 'success'
+            ? 'bg-green-500/20 text-green-400 border border-green-500/30'
+            : 'bg-red-500/20 text-red-400 border border-red-500/30'
+          }`}>
+          {emailStatus.message}
+        </div>
+      )}
+
+      {/* Send Email Button */}
+      <button
+        onClick={sendEmail}
+        disabled={sending || !canSendEmail}
+        className={`mt-4 w-full py-3 rounded-lg font-semibold transition-all flex items-center justify-center gap-2 ${!canSendEmail
+            ? 'bg-gray-700/50 text-gray-500 cursor-not-allowed'
+            : sending
+              ? 'bg-purple-600/50 text-purple-300 cursor-wait'
+              : 'bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white'
+          }`}
+      >
+        <Mail className="w-4 h-4" />
+        {sending ? 'Sending...' : canSendEmail ? 'Send Email' : 'Not Qualified for Email'}
+      </button>
+
+      {!canSendEmail && (
+        <p className="text-xs text-gray-500 mt-2 text-center">
+          Only HOT, QUALIFIED, and WARM leads can receive emails
+        </p>
+      )}
+    </motion.div>
+  );
+}
+
+
 function LeadModal({ lead, onClose }) {
   if (!lead) return null;
 
@@ -247,7 +370,7 @@ function LeadModal({ lead, onClose }) {
 
         <p className="text-gray-400 mt-4 mb-2">Raw JSON Data</p>
         <pre className="bg-black/40 p-4 rounded-xl text-gray-300 text-sm max-h-64 overflow-auto">
-{JSON.stringify(lead, null, 2)}
+          {JSON.stringify(lead, null, 2)}
         </pre>
 
       </div>

@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route } from "react-router-dom"
 import Home from "./pages/Home"
 import Dashboard from "./pages/Dashboard"
+import LeadQualificationForm from "./pages/LeadQualificationForm"
 import ErrorBoundary from "./ErrorBoundary"
 
 function App() {
@@ -8,6 +9,8 @@ function App() {
     <BrowserRouter>
       <Routes>
         <Route path="/" element={<Home />} />
+
+        <Route path="/qualify" element={<LeadQualificationForm />} />
 
         <Route
           path="/dashboard"

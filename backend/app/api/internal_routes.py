@@ -15,39 +15,105 @@ def agent_result(payload: dict, db: Session = Depends(get_db)):
     lead_id = payload.get("lead_id")
     decision = payload.get("decision")
     score = payload.get("score", 0.0)
-    details = payload.get("details")
+    signals = payload.get("signals", {})
+    confidence = payload.get("confidence", 0.0)
+    risk_flags = payload.get("risk_flags", [])
 
     AGENTS_URL = os.getenv("AGENTS_URL", "http://agents:8010")
 
-    if decision in ["QUALIFIED", "CONTACT"]:
-        update_lead_status(db, lead_id, "QUALIFIED", score)
+    print(f"🔔 RESULT RECEIVED | ID: {lead_id} | DECISION: {decision} | SCORE: {score}")
+
+    # Update lead with confidence and risk_flags
+    lead = db.query(Lead).filter(Lead.id == lead_id).first()
+    if lead:
+        lead.confidence = confidence
+        lead.risk_flags = risk_flags
+        db.commit()
+
+    # Handle different qualification tiers with AUTOMATIC email sending
+    if decision in ["HOT", "QUALIFIED", "WARM"]:
+        print(f"⚡ AUTOMATIC TRIGGER: Sending email for {decision} lead...")
+        # High and medium priority leads - send email automatically
+        update_lead_status(db, lead_id, decision, score)
         
-        # TRIGGER SALES AGENT
+        # Extract detailed information from signals
+        email_data = signals.get("email", {})
+        company_data = signals.get("company", {})
+        name_data = signals.get("name", {})
+        message_data = signals.get("message", {})
+        
+        # TRIGGER AUTOMATIC EMAIL SENDING
         try:
-             httpx.post(
+            print(f"   -> Calling Agents Service: {AGENTS_URL}/run/sales_followup")
+            response = httpx.post(
                 f"{AGENTS_URL}/run/sales_followup",
                 json={
                     "lead_id": lead_id,
-                    "name": details.get("name", {}).get("name") if details else None, 
-                    "company": details.get("company", {}).get("company") if details else None,
+                    "name": lead.name if lead else None,
+                    "email": lead.email if lead else None,
+                    "company": lead.company if lead else None,
                     "score": score,
-                    "decision": decision
+                    "decision": decision,
+                    "confidence": confidence,
+                    # Additional context for personalization
+                    "email_type": email_data.get("type"),
+                    "company_size": company_data.get("size"),
+                    "company_industry": company_data.get("industry"),
+                    "message_intent": message_data.get("intent"),
                 },
-                timeout=5
+                timeout=10
             )
+            print(f"   -> Response Code: {response.status_code}")
+            
+            # Log email sending result
+            if response.status_code == 200:
+                result = response.json()
+                create_log(db, lead_id, "auto_email_sent", {
+                    "status": result.get("status"),
+                    "decision": decision,
+                    "score": score,
+                    "sent_by": "agent_automatic"
+                })
+            
         except Exception as e:
             print(f"Failed to trigger sales agent: {e}")
+            create_log(db, lead_id, "auto_email_failed", {
+                "error": str(e),
+                "decision": decision
+            })
 
-    elif decision == "IN_PROGRESS":
-        update_lead_status(db, lead_id, "IN_PROGRESS", score)
+    elif decision == "NURTURE":
+        # Medium-priority leads - add to nurture campaign (no immediate email)
+        update_lead_status(db, lead_id, "NURTURE", score)
+        create_log(db, lead_id, "nurture_campaign_added", {
+            "score": score,
+            "confidence": confidence,
+            "risk_flags": risk_flags
+        })
+
+    elif decision == "REVIEW":
+        # Needs manual review
+        update_lead_status(db, lead_id, "REVIEW", score)
+        create_log(db, lead_id, "manual_review_required", {
+            "score": score,
+            "confidence": confidence,
+            "risk_flags": risk_flags
+        })
     else:
+        # NOT_QUALIFIED
         update_lead_status(db, lead_id, "NOT_QUALIFIED", score)
 
     create_log(
         db,
         lead_id,
         "agent_result",
-        {"decision": decision, "score": score, "details": details},
+        {
+            "decision": decision, 
+            "score": score, 
+            "confidence": confidence,
+            "risk_flags": risk_flags,
+            "signals": signals
+        },
     )
 
     return {"status": "ok"}
